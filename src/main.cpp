@@ -3,9 +3,16 @@
 #include <Arduino.h>
 #include <Servo.h>
 #include <LiquidCrystal_I2C.h>
+#include <ESP8266HTTPClient.h>
+#include <ArduinoJson.h>
+#include <string.h>
 Servo myservo;
 long previousMillis=0;
 long interval=5000;
+String wifi_ip_str="";
+WiFiClient wifi_cli;
+HTTPClient client;
+int responseCode;
 /*Put WiFi SSID & Password*/
 const char* ssid = "RishiRealme";   // Enter SSID here
 const char* wifi_password = "Deb@5578"; // Enter Password here
@@ -14,6 +21,7 @@ ESP8266WebServer server(80);
 wl_status_t last_status;
 LiquidCrystal_I2C lcd(0x27,20,4);
 
+StaticJsonDocument<512> doc;
 String updateWebpage(String s,bool t);
 void handle_home();
 void handle_login();
@@ -42,15 +50,12 @@ void setup() {
   lcd.backlight();
   // lcd.setContrast(128);
   pinMode(D4, OUTPUT);
-
   Serial.println("Connecting to ");
   Serial.println(ssid);
   lcd.setCursor(0,0);
   lcd.print("Connecting .....");
-
   //connect to your local wi-fi network
   WiFi.begin(ssid, wifi_password);
-
   // //check NodeMCU is connected to Wi-fi network
   // while (WiFi.status() != WL_CONNECTED) {
   // delay(1000);
@@ -169,8 +174,38 @@ void handle_home() {
 }
 
 void handle_login() {
-  
-  server.send(200, "text/html", updateWebpage("/login",server.arg("password").equals(door_password))); 
+lcd_init();
+lcd.setCursor(0,2);
+lcd.print("Verifying...");
+  client.setTimeout(10000);
+  wifi_ip_str=WiFi.localIP().toString();
+  String link="http://"+wifi_ip_str.substring(0,wifi_ip_str.lastIndexOf("."))+".181/esp_wifi_door_control/";
+  client.begin(wifi_cli,link);
+  responseCode=client.POST("{\"username\":\""+server.arg("username")+"\",\"password\":\""+server.arg("password")+"\"}");
+  Serial.println(client.getString());
+  if(responseCode==200){
+  DeserializationError error = deserializeJson(doc, client.getString());
+  client.end();
+  if(error){
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.c_str());
+  }
+  else{
+    if((boolean)doc["validated"]){
+  server.send(200, "text/html", updateWebpage("/login",true)); 
+  lcd.setCursor(0,3);
+  lcd.print("By: "+server.arg("username"));
+    }
+    else{
+  server.send(200, "text/html", updateWebpage("/login",false)); 
+    }
+  }
+  }else{
+    Serial.println("responseCode="+responseCode);
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("response code = "+responseCode);
+  }
 }
 
 void handle_NotFound(){
@@ -180,9 +215,10 @@ void handle_NotFound(){
 String updateWebpage(String s,bool t){
   String ptr = "<!DOCTYPE html> <html>\n";
   ptr +="<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
+  ptr +="<link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css\" rel=\"stylesheet\" integrity=\"sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN\" crossorigin=\"anonymous\">";
   ptr +="<title>Door Control</title>\n";
   ptr +="</head>\n";
-  ptr +="<body>\n";
+  ptr +="<body class=\"container d-flex flex-column align-items-center\">\n";
   if(s.equals("/login") && t){
     open_door=true;
     lcd_init();
@@ -204,10 +240,12 @@ lcd_init();
   open_door=false;
   }
   ptr +="<h1>Enter Password</h1>\n";
-  ptr +="<form method=\"post\" action=\"/login\">";
-  ptr +="<input type=\"text\" name=\"password\">";
-  ptr +="<button type=\"submit\">Submit</button.";
+  ptr +="<form method=\"post\" action=\"/login\" class=\"d-flex flex-column align-items-center w-50\" style=\"min-width=22rem\">";
+  ptr +="<input type=\"text\" class=\"form-control mb-2\" name=\"username\" placeholder=\"username\">";
+  ptr +="<input type=\"password\" class=\"form-control mb-2\" name=\"password\" placeholder=\"password\">";
+  ptr +="<button type=\"submit\" class=\"btn btn-primary\">Submit</button.";
   ptr +="</form>";
+  ptr +="<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js\" integrity=\"sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL\" crossorigin=\"anonymous\"></script>";
   ptr +="</body>\n";
   ptr +="</html>\n";
   return ptr;
