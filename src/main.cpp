@@ -16,7 +16,6 @@ int responseCode;
 /*Put WiFi SSID & Password*/
 const char* ssid = "RishiRealme";   // Enter SSID here
 const char* wifi_password = "Deb@5578"; // Enter Password here
-const String door_password="mummykamagarmach";
 ESP8266WebServer server(80);
 wl_status_t last_status;
 LiquidCrystal_I2C lcd(0x27,20,4);
@@ -26,6 +25,8 @@ String updateWebpage(String s,bool t);
 void handle_home();
 void handle_login();
 void handle_NotFound();
+void handle_door_close();
+void check_door();
 void lcd_init();
 boolean open_door=false;
 void lcd_init(){
@@ -64,7 +65,9 @@ void setup() {
   // lcd_init();
 
   server.on("/", handle_home);
-  server.on("/login", handle_login);
+  server.on("/login",HTTP_POST ,handle_login);
+  server.on("/door_close" ,handle_door_close);
+  server.on("/check_door" ,check_door);
   server.onNotFound(handle_NotFound);
 
   server.begin();
@@ -161,12 +164,23 @@ void loop() {
   }
   if(open_door){
     myservo.write(180);
-    delay(1000);
   }
   else{
     myservo.write(0);
-    delay(1000);
   }
+    delay(1000);
+}
+
+void check_door(){
+  server.send(200,"text/plain","{\"open_door\":"+(String)open_door+"}");
+}
+
+void handle_door_close(){
+  open_door=false;
+  lcd_init();
+  lcd.setCursor(0,2);
+  lcd.print("Door Closed!");
+  server.send(200,"text/plain","{\"success\":true}");
 }
 
 void handle_home() {
@@ -192,16 +206,26 @@ lcd.print("Verifying...");
   }
   else{
     if((boolean)doc["validated"]){
-  server.send(200, "text/html", updateWebpage("/login",true)); 
+  server.send(200, "text/plain", "{\"success\":true}"); 
+  open_door=true;
+  lcd_init();
+  lcd.setCursor(0,2);
+  lcd.print("Door opened!");
   lcd.setCursor(0,3);
   lcd.print("By: "+server.arg("username"));
     }
     else{
-  server.send(200, "text/html", updateWebpage("/login",false)); 
+  server.send(200, "text/plain", "{\"success\":false}");  
+  lcd_init();
+  lcd.setCursor(0,2);
+  lcd.print("Wrong Credentials!");
+  delay(5000);
+  lcd_init();
     }
   }
   }else{
     Serial.println("responseCode="+responseCode);
+  server.send(200, "text/plain", "{\"success\":false,\"message\":\"Something went wrong!\"}");  
     lcd.clear();
     lcd.setCursor(0,0);
     lcd.print("response code = "+responseCode);
@@ -213,39 +237,27 @@ void handle_NotFound(){
 }
 
 String updateWebpage(String s,bool t){
-  String ptr = "<!DOCTYPE html> <html>\n";
+  String ptr = "<!DOCTYPE html> <html data-bs-theme=\"dark\">\n";
   ptr +="<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
   ptr +="<link href=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css\" rel=\"stylesheet\" integrity=\"sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN\" crossorigin=\"anonymous\">";
   ptr +="<title>Door Control</title>\n";
   ptr +="</head>\n";
   ptr +="<body class=\"container d-flex flex-column align-items-center\">\n";
-  if(s.equals("/login") && t){
-    open_door=true;
-    lcd_init();
-    lcd.setCursor(0,2);
-    lcd.print("Door Opened!");
-  ptr +="<h3>Opened door successfully</h3>";
-  ptr +="<a href=\"/\">Close Door</a>";
-  }
-  else if(s.equals("/login")){
-    lcd_init();
-    lcd.setCursor(0,2);
-    lcd.print("Wrong password");
-  ptr="<h3>Wrong password</h3>";
-  }
-  if(s.equals("/")){
-lcd_init();
-    lcd.setCursor(0,2);
-    lcd.print("Door Closed!");
-  open_door=false;
-  }
+  ptr +="<div class=\"alert\" style=\"display:none;\" id=\"main_alert\"></div>";
   ptr +="<h1>Enter Password</h1>\n";
-  ptr +="<form method=\"post\" action=\"/login\" class=\"d-flex flex-column align-items-center w-50\" style=\"min-width=22rem\">";
-  ptr +="<input type=\"text\" class=\"form-control mb-2\" name=\"username\" placeholder=\"username\">";
-  ptr +="<input type=\"password\" class=\"form-control mb-2\" name=\"password\" placeholder=\"password\">";
-  ptr +="<button type=\"submit\" class=\"btn btn-primary\">Submit</button.";
-  ptr +="</form>";
+  ptr +="<form><fieldset class=\"d-flex flex-column align-items-center w-50\" style=\"min-width:22rem\">";
+  ptr +="<input type=\"text\" class=\"form-control mb-2\" name=\"username\" id=\"username\" placeholder=\"username\" required>";
+  ptr +="<input type=\"password\" class=\"form-control mb-2\" id=\"password\" name=\"password\" placeholder=\"password\" required>";
+  ptr +="<button type=\"submit\" id=\"submit_btn\" class=\"btn btn-primary\">Open Door</button>";
+  ptr +="<button type=\"button\" id=\"close_door_btn\" class=\"mt-4 btn btn-success\" style=\"display:";
+  if(!open_door)
+  ptr +="none";
+  ptr +=";\">Close Door</button>";
+  ptr +="</fieldset></form>";
   ptr +="<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js\" integrity=\"sha384-C6RzsynM9kWDrMNeT87bh95OGNyZPhcTNXj1NW7RuBCsyN/o0jlpcV8Qyq46cDfL\" crossorigin=\"anonymous\"></script>";
+  ptr +="<script>function show_alert(type,message){alert=document.getElementById('main_alert'); alert.classList='alert alert-'+type; alert.innerText=message; alert.style.display=''; setTimeout(()=>{document.getElementById('main_alert').style.display='none'},5000)}";
+  ptr +="function check_door(){const xhr=new XMLHttpRequest;xhr.open(\"GET\",\"/check_door\",true);xhr.setRequestHeader(\"Content-Type\",\"application/x-www-form-urlencoded\");xhr.onload=function(){const res=JSON.parse(this.responseText); if(res.open_door){document.getElementById('close_door_btn').style.display='';}else{document.getElementById('close_door_btn').style.display='none';} check_door();};xhr.send();} check_door();";
+  ptr +="document.getElementById('close_door_btn').addEventListener('click',function (){document.getElementById('close_door_btn').innerHTML='<span class=\"spinner-border spinner-border-sm\" aria-hidden=\"true\"></span><span class=\"visually-hidden\" role=\"status\">Closing...</span>';document.querySelector('fieldset').setAttribute('disabled',true);const xhr=new XMLHttpRequest;xhr.open(\"POST\",\"/door_close\",true);xhr.setRequestHeader(\"Content-Type\",\"application/x-www-form-urlencoded\");xhr.onload=function (){document.getElementById('close_door_btn').innerHTML='Close Door';document.querySelector('fieldset').removeAttribute('disabled');const res=JSON.parse(this.responseText); if(res.success){document.getElementById('close_door_btn').style.display=\"none\"; show_alert('success','Door closed!')}};xhr.send();});document.querySelector('form').addEventListener('submit',function (e){e.preventDefault(); document.getElementById('submit_btn').innerHTML='<span class=\"spinner-border spinner-border-sm\" aria-hidden=\"true\"></span><span class=\"visually-hidden\" role=\"status\">Verifying...</span>';;document.querySelector('fieldset').setAttribute('disabled',true);const xhr=new XMLHttpRequest;xhr.open(\"POST\",\"/login\",true);xhr.setRequestHeader(\"Content-Type\",\"application/x-www-form-urlencoded\");xhr.onload=function (){document.getElementById('submit_btn').innerHTML='Open Door';document.querySelector('fieldset').removeAttribute('disabled');const res=JSON.parse(this.responseText); if(res.success){document.getElementById('close_door_btn').style.display=\"\"; show_alert('success','Door opened!')}else{if(res.message!=null){show_alert('danger',res.message)}else{show_alert('danger','Wrong credentials!')}}};xhr.send(\"username=\"+document.getElementById('username').value+\"&password=\"+document.getElementById('password').value);})</script>";
   ptr +="</body>\n";
   ptr +="</html>\n";
   return ptr;
