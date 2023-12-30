@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"name": "Soil_Testing",
+			"path": "../Soil_Testing"
+		}
+	],
+	"settings": {}
+}
